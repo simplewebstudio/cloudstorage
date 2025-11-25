@@ -20,6 +20,7 @@
             background-color: #000;
             color: white;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overscroll-behavior: none; /* Prevents pull-to-refresh on mobile */
         }
         
         @keyframes shake-gentle {
@@ -154,7 +155,9 @@
             useEffect(() => {
                 let lastX = 0, lastY = 0, lastZ = 0;
                 let lastTime = 0;
-                const threshold = 8; 
+                // INCREASED THRESHOLD HERE:
+                const threshold = 25; 
+
                 const handleMotion = (e) => {
                     if (appState !== 'cleaning' || isActiveRef.current) return;
                     const current = e.accelerationIncludingGravity;
