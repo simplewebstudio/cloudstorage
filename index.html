@@ -1,0 +1,328 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Smartphone, Zap, CheckCircle2, RotateCcw, ArrowRight } from 'lucide-react';
+
+// Constants for the simulation
+const TOTAL_STORAGE = 512;
+
+const INITIAL_STATE = {
+    photos: 280.5,
+    apps: 120.2,
+    icloud: 65.4,
+    ios: 12.0,
+    system: 18.5
+};
+
+const CLEARED_STATE = {
+    photos: 120.5,
+    apps: 90.2,
+    icloud: 15.4,
+    ios: 12.0,
+    system: 8.5
+};
+
+const COLORS = {
+    photos: '#FF3B30',
+    apps: '#FF9500',
+    icloud: '#FFCC00',
+    ios: '#8E8E93',
+    system: '#323232',
+    free: '#1C1C1E'
+};
+
+const interpolate = (start, end, progress) => {
+    return start - ((start - end) * progress);
+};
+
+const StorageBar = ({ currentData, total, savedSpace }) => {
+    const used = Object.values(currentData).reduce((a, b) => a + b, 0);
+    const free = Math.max(0, total - used);
+    const getPercent = (val) => (val / total) * 100;
+
+    return (
+        <div className="w-full">
+            {/* Header Text */}
+            <div className="flex justify-between items-end mb-4 px-1">
+                <h2 className="text-3xl font-semibold tracking-tight text-white">iPhone</h2>
+                <div className="text-right">
+                    <div className="text-sm font-medium text-gray-400 mb-1">
+                        {used.toFixed(1)} GB of {total} GB Used
+                    </div>
+                </div>
+            </div>
+
+            {/* The Bar */}
+            <div className="h-8 w-full bg-black rounded-lg overflow-hidden flex mb-6 relative shadow-inner border border-white/10">
+                <div className="bar-segment h-full transition-all duration-75 ease-linear" style={{ width: `${getPercent(currentData.photos)}%`, backgroundColor: COLORS.photos }} />
+                <div className="bar-segment h-full border-l border-black/20 transition-all duration-75 ease-linear" style={{ width: `${getPercent(currentData.apps)}%`, backgroundColor: COLORS.apps }} />
+                <div className="bar-segment h-full border-l border-black/20 transition-all duration-75 ease-linear" style={{ width: `${getPercent(currentData.icloud)}%`, backgroundColor: COLORS.icloud }} />
+                <div className="bar-segment h-full border-l border-black/20 transition-all duration-75 ease-linear" style={{ width: `${getPercent(currentData.ios)}%`, backgroundColor: COLORS.ios }} />
+                <div className="bar-segment h-full border-l border-black/20 transition-all duration-75 ease-linear" style={{ width: `${getPercent(currentData.system)}%`, backgroundColor: COLORS.system }} />
+                
+                {/* Free Space Indicator (Fills remaining space) */}
+                <div className="flex-1 h-full flex items-center justify-center min-w-0 overflow-hidden">
+                    <span className="text-xs font-medium text-gray-400 whitespace-nowrap px-1 transition-opacity duration-300" style={{ opacity: free > 10 ? 1 : 0 }}>
+                        {free.toFixed(2)} GB
+                    </span>
+                </div>
+            </div>
+
+            {/* Legend / Status */}
+            <div className="flex flex-col gap-4">
+                 <div className="flex flex-wrap gap-x-4 gap-y-2 text-[12px] font-medium text-gray-400">
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.photos }} /> Photos
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.apps }} /> Apps
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.icloud }} /> iCloud Drive
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.ios }} /> iOS
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.system }} /> System Data
+                    </div>
+                </div>
+
+                {/* Live Saved Counter */}
+                {savedSpace > 0 && (
+                    <div className="flex items-center gap-2 text-green-400 font-bold animate-in fade-in duration-300 self-end">
+                        <Zap className="w-4 h-4 fill-current" />
+                        <span>{savedSpace.toFixed(1)} GB Cleared</span>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default function App() {
+    // App State: 'idle' | 'cleaning' | 'completed'
+    const [appState, setAppState] = useState('idle');
+    const [progress, setProgress] = useState(0); // 0.0 to 1.0
+    const [isShaking, setIsShaking] = useState(false);
+    const [permissionGranted, setPermissionGranted] = useState(false);
+    
+    // Refs for animation loop
+    const requestRef = useRef();
+    const isActiveRef = useRef(false);
+    const progressRef = useRef(0);
+
+    // Calculate current data based on progress
+    const currentData = {
+        photos: interpolate(INITIAL_STATE.photos, CLEARED_STATE.photos, progress),
+        apps: interpolate(INITIAL_STATE.apps, CLEARED_STATE.apps, progress),
+        icloud: interpolate(INITIAL_STATE.icloud, CLEARED_STATE.icloud, progress),
+        ios: interpolate(INITIAL_STATE.ios, CLEARED_STATE.ios, progress), // Static
+        system: interpolate(INITIAL_STATE.system, CLEARED_STATE.system, progress),
+    };
+
+    const initialTotal = Object.values(INITIAL_STATE).reduce((a,b) => a+b, 0);
+    const currentTotal = Object.values(currentData).reduce((a,b) => a+b, 0);
+    const savedSpace = initialTotal - currentTotal;
+
+    // Reset Flow
+    const reset = () => {
+        setAppState('idle');
+        setProgress(0);
+        progressRef.current = 0;
+        setIsShaking(false);
+    };
+
+    // Animation Loop for Cleaning
+    const advanceProgress = () => {
+        // Needs ~3.5 seconds to reach 1.0 from 0.0
+        const increment = 0.006; 
+        
+        progressRef.current = Math.min(progressRef.current + increment, 1);
+        setProgress(progressRef.current);
+
+        if (progressRef.current >= 1) {
+            setAppState('completed');
+            isActiveRef.current = false;
+            setIsShaking(false);
+            if (navigator.vibrate) navigator.vibrate([200]); // Success buzz
+        } else {
+            requestRef.current = requestAnimationFrame(advanceProgress);
+        }
+    };
+
+    // --- Interaction Handlers ---
+
+    // Desktop: Mouse Down / Touch Start
+    const handleInteractionStart = () => {
+        if (appState !== 'cleaning') return;
+        isActiveRef.current = true;
+        setIsShaking(true);
+        if (navigator.vibrate) navigator.vibrate(50); // Haptic start
+        requestRef.current = requestAnimationFrame(advanceProgress);
+    };
+
+    // Desktop: Mouse Up / Touch End
+    const handleInteractionEnd = () => {
+        if (appState !== 'cleaning') return;
+        isActiveRef.current = false;
+        setIsShaking(false);
+        if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+
+    // Mobile: Shake Detection
+    useEffect(() => {
+        let lastX = 0, lastY = 0, lastZ = 0;
+        let lastTime = 0;
+        const threshold = 8; // Lower threshold for easier continuous shaking
+
+        const handleMotion = (e) => {
+            if (appState !== 'cleaning' || isActiveRef.current) return; // Don't double count if holding button
+
+            const current = e.accelerationIncludingGravity;
+            if (!current) return;
+
+            const currentTime = Date.now();
+            if ((currentTime - lastTime) > 100) {
+                const diffTime = currentTime - lastTime;
+                lastTime = currentTime;
+
+                const speed = Math.abs(current.x + current.y + current.z - lastX - lastY - lastZ) / diffTime * 10000;
+
+                // If shaking vigorously enough
+                if (speed > threshold) {
+                    setIsShaking(true);
+                    
+                    // Manually advance progress a chunk for each "shake" detected
+                    const shakeIncrement = 0.05; // 5% per strong shake
+                    progressRef.current = Math.min(progressRef.current + shakeIncrement, 1);
+                    setProgress(progressRef.current);
+
+                    if (progressRef.current >= 1) {
+                        setAppState('completed');
+                        if (navigator.vibrate) navigator.vibrate([200]);
+                    }
+                    
+                    // Reset shaking visual after a delay
+                    setTimeout(() => setIsShaking(false), 200);
+                }
+
+                lastX = current.x;
+                lastY = current.y;
+                lastZ = current.z;
+            }
+        };
+
+        if (permissionGranted && appState === 'cleaning') {
+            window.addEventListener('devicemotion', handleMotion);
+        }
+
+        return () => {
+            window.removeEventListener('devicemotion', handleMotion);
+        };
+    }, [permissionGranted, appState]);
+
+    const requestPermission = async () => {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            try {
+                const response = await DeviceMotionEvent.requestPermission();
+                if (response === 'granted') setPermissionGranted(true);
+            } catch (e) { console.error(e); }
+        } else {
+            setPermissionGranted(true);
+        }
+    };
+
+    // --- Render Helpers ---
+
+    return (
+        <div className="min-h-screen bg-black text-white font-sans flex items-center justify-center p-4">
+            <style>{`
+                @keyframes shake-gentle {
+                    0%, 100% { transform: rotate(0deg); }
+                    25% { transform: rotate(-5deg); }
+                    75% { transform: rotate(5deg); }
+                }
+                .animate-shake-gentle {
+                    animation: shake-gentle 0.5s ease-in-out infinite;
+                }
+                .bar-segment {
+                     /* No transition here to keep it snappy during hold */
+                }
+            `}</style>
+
+            <div className="w-full max-w-md bg-[#1C1C1E] rounded-[2.5rem] p-8 shadow-2xl border border-[#333] relative overflow-hidden">
+                
+                {/* Visual Storage Display */}
+                <div className="transition-all duration-500">
+                    <StorageBar currentData={currentData} total={TOTAL_STORAGE} savedSpace={savedSpace} />
+                </div>
+
+                {/* --- Interactive Area --- */}
+                <div className="mt-12 h-48 flex flex-col items-center justify-center relative">
+                    
+                    {/* STATE: IDLE */}
+                    {appState === 'idle' && (
+                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex flex-col items-center">
+                            <button 
+                                onClick={() => {
+                                    setAppState('cleaning');
+                                    requestPermission();
+                                }}
+                                className="group relative w-full py-5 bg-blue-600 hover:bg-blue-500 rounded-2xl font-semibold text-xl transition-all active:scale-[0.98] shadow-lg shadow-blue-900/20 flex items-center justify-center gap-3"
+                            >
+                                Start Cleaning
+                                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                            </button>
+                        </div>
+                    )}
+
+                    {/* STATE: CLEANING */}
+                    {appState === 'cleaning' && (
+                        <div className="animate-in zoom-in duration-300 flex flex-col items-center w-full">
+                            
+                            {/* Shake Icon / Button */}
+                            <button
+                                onMouseDown={handleInteractionStart}
+                                onMouseUp={handleInteractionEnd}
+                                onMouseLeave={handleInteractionEnd}
+                                onTouchStart={handleInteractionStart}
+                                onTouchEnd={handleInteractionEnd}
+                                className={`
+                                    w-24 h-24 rounded-full flex items-center justify-center mb-6 transition-all duration-200
+                                    ${isShaking 
+                                        ? 'bg-orange-500 text-white scale-110 shadow-[0_0_40px_rgba(249,115,22,0.4)] animate-shake-gentle' 
+                                        : 'bg-[#2C2C2E] text-gray-400 hover:bg-[#3A3A3C]'
+                                    }
+                                `}
+                            >
+                                <Smartphone className={`w-10 h-10 ${isShaking ? 'fill-current' : ''}`} />
+                            </button>
+
+                            <h3 className={`text-xl font-semibold mb-2 transition-colors ${isShaking ? 'text-white' : 'text-gray-400'}`}>
+                                {isShaking ? "Cleaning..." : "Shake Phone"}
+                            </h3>
+                            
+                            <p className="text-gray-500 text-sm text-center max-w-[200px]">
+                                {permissionGranted 
+                                    ? "Shake your device or hold the icon above to clean." 
+                                    : "Hold the icon above to clean."
+                                }
+                            </p>
+                        </div>
+                    )}
+
+                    {/* STATE: COMPLETED */}
+                    {appState === 'completed' && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center animate-in zoom-in duration-500">
+                            <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mb-4 shadow-[0_0_30px_rgba(34,197,94,0.5)]">
+                                <CheckCircle2 className="w-10 h-10 text-white" />
+                            </div>
+                            <h2 className="text-2xl font-bold text-white mb-2">All Clear!</h2>
+                            <p className="text-gray-400 mb-6">{savedSpace.toFixed(1)} GB removed</p>
+                        </div>
+                    )}
+                </div>
+
+            </div>
+        </div>
+    );
+}
